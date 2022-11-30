@@ -1,0 +1,270 @@
+---
+title: "Siddhartha: a través de los números"
+subtitle: "Un análisis estadístico sobre el libro Siddhartha"
+author: "María José Segura Ramírez y Juan Javier González González"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+    toc: true
+toc-title: "Contenido"
+vignette: >
+  %\VignetteIndexEntry{Creating Pretty Documents from R Markdown - The Cayman Theme}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+if(capabilities("cairo"))
+    knitr::opts_chunk$set(dev.args = list(type = "cairo"))
+```
+
+
+En los últimos años, el interés del público en general en cuanto al análisis de datos y la aplicación de las matemáticas en campos no comunes ha ido en aumento. Por tal motivo, decidimos realizar un análisis estadístico de textos aplicado a dos libros: Siddhartha y El Lobo Estepario, ambos escritos por el alemán Herman Hesse (1977-1962).
+
+Este análisis lo hicimos utilizando el lenguaje de programación R, y el código podrá ser aplicado para otros libros, con algunas pequeñas modificaciones.
+
+# Análisis estadístico de textos
+
+Los análisis estadísticos de textos son una serie de técnicas y metodologías que nos pueden ayudar a extraer información general de un determinado texto, esto con la finalidad de encontrar y clarificar las intenciones o sentimientos que el texto en sí transmite a su audiencia. En otras palabras, queríamos ver cómo el análisis iba a interpretar lo que el libro puede transmitir a los lectores a través del mismo.
+
+Para realizar el análisis, decidimos hacer lo siguiente:
+
+  * Frecuencias de términos
+  * Emociones presentes en el libro
+  * Análisis de sentimiento
+  * Bigramas
+
+### Preparando los datos
+
+Como ya se mencionó anteriormente, el análisis lo hicimos con R. Estas fueron las librerías que utilizamos:
+
+```{r, message=FALSE, fig.width=6, fig.height=6, fig.align='center'}
+
+library(pdftools)
+library(plyr)
+library(dplyr)
+library(stringr)
+library(tidytext)
+library(syuzhet)
+library(wordcloud)
+library(plotly)
+library(tibble)
+library(tm)
+library(igraph)
+library(ggraph)
+library(tidyr)
+library(readr)
+
+```
+
+
+Lo primero que hicimos fue descargar los libros en formato pdf, para después transformar el texto en el formato necesario:
+
+
+```{r, message=FALSE, warning=FALSE, fig.width=6, fig.height=6, fig.align='center'}
+
+libro <- pdf_text("Siddhartha.pdf")
+
+lineas <- libro[7:86] %>%
+  read_lines() %>%
+  data.frame() %>%
+  rename(text = 1)
+
+palabras <- lineas %>%
+  unnest_tokens(word,text)
+
+stop_words_spanish <- dplyr::bind_rows(stop_words,
+                               data_frame(word = tm::stopwords("spanish"),
+                                          lexicon = "custom"))
+
+palabras <- palabras %>%
+  anti_join(stop_words_spanish)
+
+```
+
+Con el código anterior, ya teníamos lo necesario para continuar con el procesamiento de los datos: el DataFrame *palabras*, el cual contiene cada una de las palabras presentes en el libro sin las palabras vacías (stop words), es decir, sin los artículos, pronombres, preposiciones, etc.
+
+### Nube de palabras
+
+El primer resultado que queríamos ver del libro era conocer cuáles eran las palabras que más se repetían a lo largo de la historia, por o tanto hicimos un resumen de frecuencias de términos.
+
+```{r  fig.align='center'}
+conteo_palabras<-palabras %>%
+  count(word, sort = TRUE) 
+
+```
+
+```{r  echo=FALSE}
+
+conteo_palabras <- conteo_palabras[- grep("www", conteo_palabras$word),]
+
+```
+
+```{r  fig.align='center'}
+
+head(conteo_palabras, 10)
+
+```
+
+Una vez que teníamos los datos, decidimos verlo de manera gráfica a través de una nube de palabras:
+
+```{r fig.width=8, fig.height=8, fig.align='center'}
+
+wordcloud(conteo_palabras$word,
+                           freq = conteo_palabras$n,
+                           max.words = 200,
+                           random.order = FALSE,
+                           min.freq = 40,
+                           colors = brewer.pal(8,"Dark2"))
+
+```
+
+### Emociones presentes
+
+Una parte importante de los análisis estadísticos de textos son los análisis de sentimientos, los cuales se utilizan para referirse a la detección e identificación de opiniones mediante la orientación positiva, negativa, neutra o mixta de las palabras que van apareciendo en el texto (Liu, en Murillo Lanza, 2017).
+
+La librería que decidimos utilizar para este análisis es *Syuzhet* y decidimos utilizarla debido a que su diccionario continuamente realiza cambios en su diccionario para mantenerlo actualizado. Esta paquetería utiliza para la ponderación de sentimientos en cada palabra el léxico NRC, el cual es una lista de palabras de distintos idiomas que asigna una ponderación a cada palabra para los 8 sentimientos básicos: enojo, miedo, alegría, anticipación, confianza, sorpresa, tristeza, felicidad y disgusto (Mohammad S., 2013).
+
+Dicho lo anterior, este fue el código que utilizamos para utilizar la librería Syuzhet con nuestro DataFrame:
+
+```{r, eval=F, fig.width=6, fig.height=6, fig.align='center'}
+
+palabras_sentimientos<- get_nrc_sentiment(palabras$word, language = "spanish")
+palabras_sentimientos<-cbind(palabras$word,palabras_sentimientos)
+
+```
+
+
+```{r, echo=FALSE}
+
+palabras_sentimientos <- read.csv('palabras_sentimiento_Sid.csv')
+
+```
+
+Teniendo el DataFrame con los datos de cada una de las palabras y sus correspondientes sentimientos asociados a ellas, decidimos hacer un resumen de estos:
+
+```{r fig.width=6, fig.height=6, fig.align='center'}
+
+suma_emociones <- data.frame(colSums(prop.table(palabras_sentimientos[,3:10])))
+colnames(suma_emociones)<-'Porcentaje'
+
+suma_emociones
+
+```
+
+Gráficando esos datos:
+
+```{r, echo=FALSE, fig.align='center'}
+
+suma_emociones <- tibble::rownames_to_column(suma_emociones,'Emociones')
+suma_emociones$Emociones<-revalue(suma_emociones$Emociones,c('anger' = 'Enojo',
+                                                             'anticipation' = 'Anticipación',
+                                                             'disgust' = 'Disgusto',
+                                                             'fear' = 'Miedo',
+                                                             'joy' = 'Alegría',
+                                                             'sadness' = 'Tristeza',
+                                                             'surprise' = 'Sorpresa',
+                                                             'trust' = 'Confianza'))
+suma_emociones$Colores<-revalue(suma_emociones$Emociones,c('Enojo' = '#FC9173',
+                                                           'Anticipación' = '#FFAC5C',
+                                                           'Disgusto' = '#CEA0EB',
+                                                           'Miedo' = '#7E7E7E',
+                                                           'Alegría' = '#FFDB53',
+                                                           'Tristeza' = '#2B91D0',
+                                                           'Sorpresa' = '#64E8ED',
+                                                           'Confianza' = '#FF8F00'))
+g_barra_emociones <- plot_ly(suma_emociones, type='bar',x = suma_emociones$Emociones,
+                             y = round(suma_emociones$Porcentaje,4)*100,
+                             text=paste(round(suma_emociones$Porcentaje*100,2),'%'),
+                             marker = list(color = suma_emociones$Colores)) %>% 
+  layout(title='Emociones presentes en Siddhartha',
+         yaxis=list(title='',
+                    zeroline = F,
+                    showline = F,
+                    showticklabels = F,
+                    showgrid = F,
+                    range=c(0,25),
+                    ticksuffix="%"),
+         xaxis=list(title='',
+                    categoryorder='array',
+                    categoryarray=suma_emociones[order(-suma_emociones$Porcentaje),'Emociones'],
+                    tickfont='white'))
+
+g_barra_emociones
+
+
+```
+
+
+### Análisis de sentimientos
+
+Para esta parte de la investigación, decidimos graficar el análisis léxico de las palabras hecho anteriormente para así realizar un seguimiento histórico de este. 
+
+Lo primero que hicimos fue realizar una sumatoria de las palabras con ponderación positiva y negativa cada 300 palabras.
+
+
+```{r fig.width=6, fig.height=6, fig.align='center'}
+
+n_palabras <- 300
+palabras_sentimientos$grupo_palabras<-rep(1:ceiling(nrow(palabras_sentimientos)/n_palabras),each = n_palabras)[1:nrow(palabras_sentimientos)]
+puntuacion <- palabras_sentimientos %>% 
+  group_by(grupo_palabras) %>% 
+  summarise(positive=sum(positive),negative=sum(negative))
+ 
+puntuacion$suma <- puntuacion$positive - puntuacion$negative
+
+```
+
+Graficando los datos anteriores:
+
+```{r echo=FALSE, fig.width=8, fig.height=6, fig.align='center'}
+
+g_puntuacion <- plot_ly(puntuacion, type = 'bar', x = puntuacion$grupo_palabras, y = puntuacion$suma) %>% 
+    layout(title = 'Siddhartha',
+           xaxis = list(title = 'Agrupación cada 300 palabras'),
+           yaxis = list(title = 'Suma de las puntuaciones'))
+g_puntuacion  
+
+
+```
+
+### Bigramas
+
+Como último análisis aplicado en el libro, quisimos conocer cuáles serían los bigramas con mayor frecuencia a los largo de libro. Como definición general, los *n-gramas* los cuales son una manera estadística para poder determinar qué palabras por lo general rodean otras y así poder conocer el contexto de las mismas.
+
+```{r fig.width=6, fig.height=6, fig.align='center'}
+
+largo <- length(palabras_sentimientos$palabras.word)
+word <- palabras_sentimientos$palabras.word
+word1<-word[1:largo-1]
+word2<-word[2:largo]
+bigrama <- as.data.frame(cbind(word1,word2))
+bigrama$final<-paste(bigrama$word1,bigrama$word2)
+  
+conteo_bigrama <- bigrama %>%
+    count(final, sort = T)
+  
+  
+conteo_bigrama<-as.data.frame(conteo_bigrama)
+conteo_bigrama2<-conteo_bigrama %>% 
+    filter(n>10)
+  
+conteo_bigrama3 <- separate(conteo_bigrama2,final, into=c("word1","word2"),sep=" (?=[^ ]+$)")
+  
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+  
+ggraph(conteo_bigrama3, layout = "fr") +
+    geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                   arrow = a, end_cap = circle(.07, 'inches')) +
+    geom_node_point(color = "lightblue", size = 5) +
+    geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+  
+  
+
+```
+
+
+
+
